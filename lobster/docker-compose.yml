@@ -1,0 +1,91 @@
+# ─────────────────────────────────────────────────────────
+# 数智企业 · Docker Compose 生产部署拓扑
+# ─────────────────────────────────────────────────────────
+
+services:
+  # PostgreSQL 数据库
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: lobster
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-change-me}
+      POSTGRES_DB: lobster
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lobster"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis 队列
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # 主应用 (Next.js)
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgresql://lobster:${DB_PASSWORD:-change-me}@postgres:5432/lobster
+      REDIS_URL: redis://redis:6379
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-change-me}
+      NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3000}
+      NODE_ENV: production
+      DEPLOYMENT_MODE: private
+      AUTH_MODE: ${AUTH_MODE:-local}
+      BROWSER_DRIVER: ${BROWSER_DRIVER:-fetch}
+      # SMTP (optional)
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      # Feishu (optional)
+      FEISHU_WEBHOOK_URL: ${FEISHU_WEBHOOK_URL:-}
+      FEISHU_APP_ID: ${FEISHU_APP_ID:-}
+      FEISHU_APP_SECRET: ${FEISHU_APP_SECRET:-}
+    ports:
+      - "3000:3000"
+    volumes:
+      - uploads-data:/data/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Agent Worker (任务执行)
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: node apps/web/.next/standalone/worker.js
+    environment:
+      DATABASE_URL: postgresql://lobster:${DB_PASSWORD:-change-me}@postgres:5432/lobster
+      REDIS_URL: redis://redis:6379
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-change-me}
+      NODE_ENV: production
+      DEPLOYMENT_MODE: private
+      BROWSER_DRIVER: ${BROWSER_DRIVER:-playwright}
+      PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH: /usr/bin/chromium-browser
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  redis-data:
+  uploads-data:

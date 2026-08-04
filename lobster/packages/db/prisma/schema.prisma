@@ -1,0 +1,399 @@
+// ─────────────────────────────────────────────────────────
+// 办公龙虾 · Prisma Schema
+// 版本: V2.0 | SQLite (dev) → PostgreSQL (prod) | UTF-8
+// ─────────────────────────────────────────────────────────
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ─── 租户 ──────────────────────────────────────────────
+
+model Tenant {
+  id        String   @id @default(uuid())
+  name      String
+  tier      String   @default("free")
+  maxSeats  Int      @default(5)
+  maxAgents Int      @default(20)
+  isActive  Boolean  @default(true)
+
+  employees     Employee[]
+  agents        Agent[]
+  projects      Project[]
+  auditLogs     AuditLog[]
+  knowledgeDocs KnowledgeDoc[]
+  graphEntities GraphEntity[]
+  graphRelations GraphRelation[]
+  credentials   Credential[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ─── 员工 ──────────────────────────────────────────────
+
+model Employee {
+  id            String   @id @default(uuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  name          String
+  email         String?  @unique
+  role          String   @default("STAFF")
+  department    String?
+  title         String?
+  permissionBm  Int      @default(1)
+  avatar        String?
+  isActive      Boolean  @default(true)
+  passwordHash  String?
+
+  agents        Agent[]       @relation("AgentOwner")
+  createdTasks  Task[]        @relation("TaskCreator")
+  approvedTasks Task[]        @relation("TaskApprover")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId])
+  @@index([email])
+  @@map("employees")
+}
+
+// ─── Agent 实例 ─────────────────────────────────────────
+
+model Agent {
+  id            String   @id @default(uuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  name          String
+  type          String   @default("DIGITAL_TWIN")
+  ownerId       String
+  owner         Employee @relation("AgentOwner", fields: [ownerId], references: [id])
+  presetRoleId  String?
+  skillTags     String   @default("[]")
+  permissionBm  Int      @default(1)
+  status        String   @default("IDLE")
+  avatar        String?
+  isActive      Boolean  @default(true)
+
+  coreMemory   AgentCoreMemory?
+  memories     AgentMemory[]
+  tasks        Task[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([ownerId])
+  @@index([tenantId])
+  @@index([status])
+  @@map("agents")
+}
+
+// ─── Agent 核心记忆 ────────────────────────────────────
+
+model AgentCoreMemory {
+  id              String   @id @default(uuid())
+  agentId         String   @unique
+  agent           Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  roleDefinition  Json     // { title, skills[], personality, boundaries }
+  experienceSummary String?
+  totalTasksCompleted Int  @default(0)
+  successRate     Float    @default(0)
+
+  updatedAt DateTime @updatedAt
+
+  @@map("agent_core_memories")
+}
+
+// ─── Agent 长期记忆 ────────────────────────────────────
+
+model AgentMemory {
+  id        String   @id @default(uuid())
+  agentId   String
+  agent     Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  type      String   @default("success")
+  summary   String
+  importance Int     @default(1)
+  metadata  Json?    // { taskId, timestamp, relatedEntities[] }
+
+  createdAt DateTime @default(now())
+
+  @@index([agentId])
+  @@index([type])
+  @@map("agent_memories")
+}
+
+// ─── 任务 ──────────────────────────────────────────────
+
+model Task {
+  id            String   @id @default(uuid())
+  tenantId      String
+
+  title         String
+  description   String?
+  status        String   @default("PENDING")
+  riskLevel     String   @default("LOW")
+  permissionLevel Int    @default(1)
+  approved      Boolean?
+  approvalComment String?
+  result        String?
+
+  creatorId     String
+  creator       Employee @relation("TaskCreator", fields: [creatorId], references: [id])
+  assigneeId    String?
+  assignee      Agent?   @relation(fields: [assigneeId], references: [id])
+  approvedById  String?
+  approvedBy    Employee? @relation("TaskApprover", fields: [approvedById], references: [id])
+  projectId     String?
+  project       Project? @relation(fields: [projectId], references: [id])
+
+  startedAt     DateTime?
+  completedAt   DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([tenantId, status])
+  @@index([assigneeId])
+  @@index([projectId])
+  @@index([creatorId])
+  @@map("tasks")
+}
+
+// ─── 项目（作战室） ────────────────────────────────────
+
+model Project {
+  id          String   @id @default(uuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  name        String
+  description String?
+  status      String   @default("ACTIVE")
+
+  participantAgentIds    String @default("[]")
+  participantEmployeeIds String @default("[]")
+
+  tasks Task[]
+  messages WarRoomMessage[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId])
+  @@map("projects")
+}
+
+// ─── 作战室消息 ────────────────────────────────────────
+
+model WarRoomMessage {
+  id          String   @id @default(uuid())
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  senderType  String   // 'human' | 'agent' | 'system'
+  senderId    String
+  senderName  String
+  avatar      String?
+  content     String
+  messageType String   @default("text") // 'text' | 'image' | 'file' | 'action'
+  metadata    String?  // JSON 字符串存储额外信息
+
+  createdAt DateTime @default(now())
+
+  @@index([projectId])
+  @@index([createdAt])
+  @@map("war_room_messages")
+}
+
+// ─── 审计日志 ──────────────────────────────────────────
+
+model AuditLog {
+  id              String   @id @default(uuid())
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  agentId         String?
+  employeeId      String?
+  action          String
+  permissionLevel Int      @default(1)
+  detail          Json?
+  ipAddress       String?
+  userAgent       String?
+  previousHash    String?
+  currentHash     String?
+
+  createdAt DateTime @default(now())
+
+  @@index([tenantId, createdAt])
+  @@index([agentId])
+  @@index([action])
+  @@map("audit_logs")
+}
+
+// ─── 知识库文档 ──────────────────────────────────────
+
+model KnowledgeDoc {
+  id              String   @id @default(uuid())
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  title           String
+  content         String
+  permissionTags  String   @default("[\"L1\"]")
+  departmentScope String   @default("[\"ALL\"]")
+  fileType        String?
+  fileSize        Int?
+  metadata        Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId])
+  @@map("knowledge_docs")
+}
+
+// ─── 知识图谱实体 ────────────────────────────────────
+
+model GraphEntity {
+  id         String   @id @default(uuid())
+  tenantId   String
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  type       String
+  name       String
+  properties Json?
+
+  outgoingRelations GraphRelation[] @relation("SourceEntity")
+  incomingRelations GraphRelation[] @relation("TargetEntity")
+
+  createdAt  DateTime @default(now())
+
+  @@unique([tenantId, name, type])
+  @@index([tenantId, type])
+  @@map("graph_entities")
+}
+
+// ─── 知识图谱关系 ────────────────────────────────────
+
+model GraphRelation {
+  id         String   @id @default(uuid())
+  tenantId   String
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  sourceId   String
+  source     GraphEntity @relation("SourceEntity", fields: [sourceId], references: [id], onDelete: Cascade)
+  targetId   String
+  target     GraphEntity @relation("TargetEntity", fields: [targetId], references: [id], onDelete: Cascade)
+
+  type       String
+  properties Json?
+
+  createdAt  DateTime @default(now())
+
+  @@index([sourceId])
+  @@index([targetId])
+  @@index([type])
+  @@map("graph_relations")
+}
+
+// ─── 凭证（Credential Vault）─────────────────────────
+
+model Credential {
+  id            String   @id @default(uuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  name          String   // 凭证名称，如 "飞书机器人"
+  type          String   // 'api_key' | 'password' | 'oauth' | 'cookie'
+  systemType    String   // 'feishu' | 'boss' | 'email' | 'crm' 等
+
+  // 凭证数据（加密存储）
+  encryptedData String
+
+  // 归属信息
+  ownerId       String?  // 归属的自然人员工 ID（最近的自然人上司）
+  agentIds      String   @default("[]") // 授权使用的 Agent ID 列表
+
+  // 状态
+  isActive      Boolean  @default(true)
+  expiresAt     DateTime?
+  lastUsedAt    DateTime?
+
+  // OAuth 专用字段
+  refreshToken  String?  // OAuth refresh token（单独加密存储）
+  oauthToken    OAuthToken?
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([tenantId])
+  @@index([ownerId])
+  @@index([systemType])
+  @@map("credentials")
+}
+
+model OAuthToken {
+  id           String   @id @default(uuid())
+  credentialId String   @unique
+  credential   Credential @relation(fields: [credentialId], references: [id], onDelete: Cascade)
+
+  accessToken  String
+  refreshToken String?
+  tokenType    String?
+  scope        String?
+  expiresAt    DateTime?
+  providerUserId String?
+  metadata     Json?
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([expiresAt])
+  @@map("oauth_tokens")
+}
+
+
+// ─── 审批（Approval）──────────────────────────────────
+
+model Approval {
+  id            String   @id @default(uuid())
+
+  // 关联信息
+  taskId        String   // 关联的任务 ID
+  subTaskId     String?  // 关联的子任务 ID（可选）
+
+  // 审批人信息
+  requesterId   String   // 请求审批的人/Agent ID
+  approverId    String   // 审批人 ID
+
+  // 审批状态
+  status        String   @default("PENDING") // PENDING | APPROVED | REJECTED | EXPIRED | CANCELLED
+  decision      String?  // approved | rejected
+  reason        String?  // 审批理由/拒绝原因
+
+  // 审批详情（JSON 存储）
+  details       String   // JSON: { action, tool, parameters, risk, preview, context }
+
+  // 时间信息
+  urgency       String?  // low | normal | high
+  expiresAt     DateTime // 过期时间
+  decidedAt     DateTime? // 决定时间
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([taskId])
+  @@index([approverId])
+  @@index([status])
+  @@index([expiresAt])
+  @@map("approvals")
+}
