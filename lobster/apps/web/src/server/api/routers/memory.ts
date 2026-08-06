@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { createTRPCRouter, publicProcedure } from "~/server/api/trpc";
+import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
 import { memoryService } from "~/server/memory/memoryService";
 
 const memoryFilterSchema = z.object({
@@ -13,7 +13,7 @@ const memoryFilterSchema = z.object({
 });
 export const memoryRouter = createTRPCRouter({
   /** 获取 Agent 的记忆列表（分页） */
-  list: publicProcedure
+  list: protectedProcedure
     .input(
       z.object({
         agentId: z.string(),
@@ -28,7 +28,7 @@ export const memoryRouter = createTRPCRouter({
     }),
 
   /** 搜索相似记忆 */
-  search: publicProcedure
+  search: protectedProcedure
     .input(
       z.object({
         agentId: z.string(),
@@ -42,7 +42,7 @@ export const memoryRouter = createTRPCRouter({
     }),
 
   /** 手动创建记忆 */
-  create: publicProcedure
+  create: protectedProcedure
     .input(
       z.object({
         agentId: z.string(),

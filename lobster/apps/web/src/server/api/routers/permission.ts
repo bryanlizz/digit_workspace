@@ -1,9 +1,9 @@
 import { z } from "zod";
-import { createTRPCRouter, publicProcedure } from "~/server/api/trpc";
+import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
 import { db } from "~/server/db";
 
 export const permissionRouter = createTRPCRouter({
-  getRoleOverview: publicProcedure.query(async () => {
+  getRoleOverview: protectedProcedure.query(async () => {
     const employees = await db.employee.findMany();
     const grouped = new Map<string, { count: number; names: string[]; permissions: number[] }>();
     employees.forEach((emp: { role: string; name: string; permissionBm: number }) => {
@@ -21,14 +21,14 @@ export const permissionRouter = createTRPCRouter({
     }));
   }),
 
-  listEmployees: publicProcedure.query(async () => {
+  listEmployees: protectedProcedure.query(async () => {
     return db.employee.findMany({
       include: { agents: { select: { id: true, name: true, status: true } } },
       orderBy: { createdAt: "desc" },
     });
   }),
 
-  updatePermission: publicProcedure
+  updatePermission: protectedProcedure
     .input(z.object({ employeeId: z.string(), permissionBm: z.number().int().min(1).max(31) }))
     .mutation(async ({ input }) => {
       const employee = await db.employee.update({

@@ -3,12 +3,12 @@
 // ─────────────────────────────────────────────────────────
 
 import { z } from "zod";
-import { createTRPCRouter, publicProcedure, protectedProcedure } from "~/server/api/trpc";
+import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
 import { vaultService } from "~/server/vault";
 
 export const credentialRouter = createTRPCRouter({
   /** 获取凭证列表（不包含明文） */
-  list: publicProcedure
+  list: protectedProcedure
     .input(
       z
         .object({
@@ -23,7 +23,7 @@ export const credentialRouter = createTRPCRouter({
     }),
 
   /** 获取单个凭证（不包含明文） */
-  getById: publicProcedure
+  getById: protectedProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ input }) => {
       return vaultService.getCredential(input.id);

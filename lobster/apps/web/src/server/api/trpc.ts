@@ -9,53 +9,79 @@
 import { initTRPC, TRPCError } from "@trpc/server";
 import { type CreateNextContextOptions } from "@trpc/server/adapters/next";
 import { getServerSession, type Session } from "next-auth";
+import { getToken } from "next-auth/jwt";
 import superjson from "superjson";
 import { ZodError } from "zod";
 
 import { authOptions } from "~/pages/api/auth/[...nextauth]";
 import { db } from "~/server/db";
 import { DEFAULT_TENANT_ID } from "~/lib/data";
+import { env } from "~/env";
 
 /**
  * 1. CONTEXT
  *
  * This section defines the "contexts" that are available in the backend API.
- *
- * These allow you to access things when processing a request, like the database, the session, etc.
  */
 
 interface CreateContextOptions {
   session: Session | null;
+  tenantId: string;
 }
 
 /**
  * This helper generates the "internals" for a tRPC context. If you need to use it, you can export
  * it from here.
- *
- * Examples of things you may need it for:
- * - testing, so we don't have to mock Next.js' req/res
- * - tRPC's `createSSGHelpers`, where we don't have req/res
- *
- * @see https://create.t3.gg/en/usage/trpc#-serverapitrpcts
  */
 const createInnerTRPCContext = (opts: CreateContextOptions) => {
   const user = opts.session?.user as Record<string, unknown> | undefined;
   return {
     db,
     session: opts.session,
-    tenantId: (user?.tenantId as string) ?? DEFAULT_TENANT_ID,
+    tenantId: (user?.tenantId as string) ?? opts.tenantId ?? DEFAULT_TENANT_ID,
   };
 };
 
 /**
  * This is the actual context you will use in your router. It will be used to process every request
  * that goes through your tRPC endpoint.
- *
- * @see https://trpc.io/docs/context
  */
 export const createTRPCContext = async (opts: CreateNextContextOptions) => {
-  const session = await getServerSession(opts.req, opts.res, authOptions);
-  return createInnerTRPCContext({ session });
+  // 1. Try cookie-based session first
+  let session = await getServerSession(opts.req, opts.res, authOptions);
+
+  // 2. Fallback: Bearer token (desktop client)
+  if (!session) {
+    try {
+      const token = await getToken({
+        req: opts.req,
+        secret: env.NEXTAUTH_SECRET,
+        raw: true, // return raw JWT string
+      });
+      if (token) {
+        // getToken returns the raw JWT string when raw:true; verify and decode it
+        const jwt = await getToken({
+          req: opts.req,
+          secret: env.NEXTAUTH_SECRET,
+        });
+        if (jwt?.sub) {
+          // Reconstruct a minimal session from JWT claims
+          session = {
+            user: {
+              id: jwt.sub,
+              name: (jwt.name as string) ?? null,
+              email: (jwt.email as string) ?? null,
+            },
+            expires: new Date(Date.now() + 86400000).toISOString(),
+          } as Session;
+        }
+      }
+    } catch {
+      // Bearer token parsing failed — session remains null
+    }
+  }
+
+  return createInnerTRPCContext({ session, tenantId: DEFAULT_TENANT_ID });
 };
 
 /**

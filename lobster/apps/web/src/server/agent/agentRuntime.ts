@@ -43,7 +43,7 @@ export class AgentRuntime {
 
     // 4. 审计
     await auditRepo.log({
-      tenantId: DEFAULT_TENANT_ID,
+      tenantId: task.tenantId,
       agentId,
       action: result.success ? "AI_EXECUTED" : "AI_EXECUTION_FAILED",
       permissionLevel: task.permissionLevel,

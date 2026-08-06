@@ -3,7 +3,7 @@
 // ─────────────────────────────────────────────────────────
 
 import { z } from "zod";
-import { createTRPCRouter, publicProcedure } from "~/server/api/trpc";
+import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
 import { auditRepo } from "~/lib/repository";
 
 const auditFilterSchema = z.object({
@@ -19,40 +19,40 @@ const auditFilterSchema = z.object({
 
 export const auditRouter = createTRPCRouter({
   /** 获取审计日志列表（支持筛选） */
-  list: publicProcedure
+  list: protectedProcedure
     .input(auditFilterSchema.optional())
     .query(async ({ input }) => {
       return auditRepo.findMany(input);
     }),
 
   /** 获取最近活动时间线 */
-  getRecentActivity: publicProcedure
+  getRecentActivity: protectedProcedure
     .input(z.object({ limit: z.number().int().default(20) }).optional())
     .query(async ({ input }) => {
       return auditRepo.findMany({ limit: input?.limit });
     }),
 
   /** 获取任务责任链 */
-  getResponsibilityChain: publicProcedure
+  getResponsibilityChain: protectedProcedure
     .input(z.object({ taskId: z.string() }))
     .query(async ({ input }) => {
       return auditRepo.getResponsibilityChain(input.taskId);
     }),
 
   /** 获取任务回放 */
-  getTaskReplay: publicProcedure
+  getTaskReplay: protectedProcedure
     .input(z.object({ taskId: z.string() }))
     .query(async ({ input }) => {
       return auditRepo.getTaskReplay(input.taskId);
     }),
 
   /** 获取审计统计 */
-  getStats: publicProcedure.query(async () => {
+  getStats: protectedProcedure.query(async () => {
     return auditRepo.getStats("tenant-default");
   }),
 
   /** 导出审计日志为 CSV 字符串 */
-  exportCsv: publicProcedure
+  exportCsv: protectedProcedure
     .input(z.object({ limit: z.number().int().default(1000) }).optional())
     .query(async ({ input }) => {
       const logs = await auditRepo.findMany({ limit: input?.limit ?? 1000, tenantId: "tenant-default" });

@@ -3,12 +3,12 @@
 // ─────────────────────────────────────────────────────────
 
 import { z } from "zod";
-import { createTRPCRouter, publicProcedure } from "~/server/api/trpc";
+import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
 import { projectRepo, warRoomMessageRepo } from "~/lib/repository";
 
 export const projectRouter = createTRPCRouter({
   /** 获取项目列表 */
-  list: publicProcedure
+  list: protectedProcedure
     .input(
       z
         .object({
@@ -21,14 +21,14 @@ export const projectRouter = createTRPCRouter({
     }),
 
   /** 获取项目详情（含完整信息） */
-  getById: publicProcedure
+  getById: protectedProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ input }) => {
       return projectRepo.getByIdWithDetails(input.id);
     }),
 
   /** 创建项目（作战室） */
-  create: publicProcedure
+  create: protectedProcedure
     .input(
       z.object({
         name: z.string().min(1, "项目名称不能为空").max(100),
@@ -42,7 +42,7 @@ export const projectRouter = createTRPCRouter({
     }),
 
   /** 更新项目 */
-  update: publicProcedure
+  update: protectedProcedure
     .input(
       z.object({
         id: z.string(),
@@ -57,7 +57,7 @@ export const projectRouter = createTRPCRouter({
     }),
 
   /** 添加 Agent 到项目 */
-  addParticipant: publicProcedure
+  addParticipant: protectedProcedure
     .input(
       z.object({
         projectId: z.string(),
@@ -70,7 +70,7 @@ export const projectRouter = createTRPCRouter({
     }),
 
   /** 从项目移除 Agent */
-  removeParticipant: publicProcedure
+  removeParticipant: protectedProcedure
     .input(
       z.object({
         projectId: z.string(),
@@ -85,7 +85,7 @@ export const projectRouter = createTRPCRouter({
   // ─── 作战室消息 ───────────────────────────────────────
 
   /** 获取项目消息列表 */
-  getMessages: publicProcedure
+  getMessages: protectedProcedure
     .input(
       z.object({
         projectId: z.string(),
@@ -102,7 +102,7 @@ export const projectRouter = createTRPCRouter({
     }),
 
   /** 发送消息 */
-  sendMessage: publicProcedure
+  sendMessage: protectedProcedure
     .input(
       z.object({
         projectId: z.string(),

@@ -3,13 +3,12 @@
 // ─────────────────────────────────────────────────────────
 
 import { z } from "zod";
-import { createTRPCRouter, publicProcedure } from "~/server/api/trpc";
+import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
 import { toolRegistry } from "~/server/tools";
-import { DEFAULT_TENANT_ID } from "~/lib/data";
 
 export const toolRouter = createTRPCRouter({
   /** 获取所有 Tool */
-  list: publicProcedure
+  list: protectedProcedure
     .input(
       z
         .object({
@@ -44,7 +43,7 @@ export const toolRouter = createTRPCRouter({
     }),
 
   /** 获取单个 Tool */
-  getById: publicProcedure
+  getById: protectedProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ input }) => {
       const tool = toolRegistry.getTool(input.id);
@@ -52,14 +51,14 @@ export const toolRouter = createTRPCRouter({
     }),
 
   /** 按系统类型获取 Tools */
-  getBySystem: publicProcedure
+  getBySystem: protectedProcedure
     .input(z.object({ systemType: z.string() }))
     .query(async ({ input }) => {
       return toolRegistry.getToolsBySystem(input.systemType);
     }),
 
   /** 搜索 Tools */
-  search: publicProcedure
+  search: protectedProcedure
     .input(
       z.object({
         query: z.string().min(1),

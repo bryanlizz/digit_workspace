@@ -3,7 +3,7 @@
 // ─────────────────────────────────────────────────────────
 
 import { z } from "zod";
-import { createTRPCRouter, publicProcedure, protectedProcedure } from "~/server/api/trpc";
+import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
 import { taskRepo } from "~/lib/repository";
 import { auditRepo } from "~/lib/repository";
 import { agentRuntime } from "~/server/agent/agentRuntime";
@@ -16,7 +16,7 @@ const riskLevelEnum = z.enum(["LOW", "MEDIUM", "HIGH"]);
 
 export const taskRouter = createTRPCRouter({
   /** 获取任务列表（支持筛选） */
-  list: publicProcedure
+  list: protectedProcedure
     .input(
       z
         .object({
@@ -33,7 +33,7 @@ export const taskRouter = createTRPCRouter({
     }),
 
   /** 获取任务详情 */
-  getById: publicProcedure
+  getById: protectedProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ input }) => {
       return taskRepo.findById(input.id);
@@ -147,12 +147,12 @@ export const taskRouter = createTRPCRouter({
     }),
 
   /** 获取待审批队列 */
-  getApprovalQueue: publicProcedure.query(async () => {
+  getApprovalQueue: protectedProcedure.query(async () => {
     return approvalService.getPendingApprovals("admin-boss");
   }),
 
   /** 获取待审批列表 */
-  getPendingApprovals: publicProcedure
+  getPendingApprovals: protectedProcedure
     .input(z.object({ approverId: z.string().default("admin-boss") }).optional())
     .query(async ({ input }) => {
       return approvalService.getPendingApprovals(input?.approverId ?? "admin-boss");
@@ -181,7 +181,7 @@ export const taskRouter = createTRPCRouter({
     }),
 
   /** 获取任务审批记录 */
-  getApprovalsByTask: publicProcedure
+  getApprovalsByTask: protectedProcedure
     .input(z.object({ taskId: z.string() }))
     .query(async ({ input }) => {
       return approvalService.getApprovalsByTask(input.taskId);
@@ -238,7 +238,7 @@ export const taskRouter = createTRPCRouter({
     }),
 
   /** 获取任务进度 */
-  getProgress: publicProcedure
+  getProgress: protectedProcedure
     .input(z.object({ taskId: z.string() }))
     .query(async ({ input }) => {
       return taskExecutor.getTaskProgress(input.taskId);
@@ -275,14 +275,14 @@ export const taskRouter = createTRPCRouter({
     }),
 
   /** 获取任务时间线 */
-  getTimeline: publicProcedure
+  getTimeline: protectedProcedure
     .input(z.object({ taskId: z.string() }))
     .query(async ({ input }) => {
       return taskRepo.getTimeline(input.taskId);
     }),
 
   /** 按项目获取任务 */
-  findByProject: publicProcedure
+  findByProject: protectedProcedure
     .input(z.object({ projectId: z.string() }))
     .query(async ({ input }) => {
       return taskRepo.findByProject(input.projectId);

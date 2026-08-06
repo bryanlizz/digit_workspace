@@ -3,17 +3,17 @@
 // ─────────────────────────────────────────────────────────
 
 import { z } from "zod";
-import { createTRPCRouter, publicProcedure } from "~/server/api/trpc";
+import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
 import { employeeRepo } from "~/lib/repository";
 
 export const employeeRouter = createTRPCRouter({
   /** 获取预设员工列表（15个标准角色） */
-  getPresets: publicProcedure.query(async () => {
+  getPresets: protectedProcedure.query(async () => {
     return employeeRepo.getPresetEmployees();
   }),
 
   /** 获取员工列表（支持筛选） */
-  list: publicProcedure
+  list: protectedProcedure
     .input(
       z
         .object({
@@ -28,14 +28,14 @@ export const employeeRouter = createTRPCRouter({
     }),
 
   /** 获取单个员工详情 */
-  getById: publicProcedure
+  getById: protectedProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ input }) => {
       return employeeRepo.findById(input.id);
     }),
 
   /** 创建员工 */
-  create: publicProcedure
+  create: protectedProcedure
     .input(
       z.object({
         name: z.string().min(1, "姓名不能为空").max(50, "姓名不能超过50字"),
@@ -51,7 +51,7 @@ export const employeeRouter = createTRPCRouter({
     }),
 
   /** 更新员工信息 */
-  update: publicProcedure
+  update: protectedProcedure
     .input(
       z.object({
         id: z.string(),
@@ -69,7 +69,7 @@ export const employeeRouter = createTRPCRouter({
     }),
 
   /** 删除员工 */
-  delete: publicProcedure
+  delete: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ input }) => {
       await employeeRepo.delete(input.id);
@@ -77,7 +77,7 @@ export const employeeRouter = createTRPCRouter({
     }),
 
   /** 按部门分组统计 */
-  getDepartmentStats: publicProcedure.query(async () => {
+  getDepartmentStats: protectedProcedure.query(async () => {
     const employees = await employeeRepo.findMany();
     const stats = new Map<string, number>();
     employees.forEach((emp) => {

@@ -8,11 +8,11 @@ import { DEFAULT_TENANT_ID } from "~/lib/data";
 import type { KeyConfig } from "./aiGateway";
 
 export class ServerKeyStore {
-  async loadKeys(): Promise<KeyConfig[]> {
+  async loadKeys(tenantId = DEFAULT_TENANT_ID): Promise<KeyConfig[]> {
     try {
       const credentials = await db.credential.findMany({
         where: {
-          tenantId: DEFAULT_TENANT_ID,
+          tenantId,
           systemType: "ai_gateway",
           isActive: true,
         },
@@ -49,13 +49,13 @@ export class ServerKeyStore {
     }
   }
 
-  async saveKey(key: KeyConfig): Promise<void> {
+  async saveKey(key: KeyConfig, tenantId = DEFAULT_TENANT_ID): Promise<void> {
     try {
       await db.credential.upsert({
         where: { id: key.id },
         create: {
           id: key.id,
-          tenantId: DEFAULT_TENANT_ID,
+          tenantId,
           name: key.label,
           type: "api_key",
           systemType: "ai_gateway",

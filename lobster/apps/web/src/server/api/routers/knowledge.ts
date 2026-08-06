@@ -3,14 +3,14 @@
 // ─────────────────────────────────────────────────────────
 
 import { z } from "zod";
-import { createTRPCRouter, publicProcedure } from "~/server/api/trpc";
+import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
 import { knowledgeRepo } from "~/lib/repository";
 import { knowledgePipeline } from "~/server/knowledge/knowledgePipeline";
 import { ragService } from "~/server/knowledge/ragService";
 
 export const knowledgeRouter = createTRPCRouter({
   /** 知识检索（含权限过滤） */
-  search: publicProcedure
+  search: protectedProcedure
     .input(
       z.object({
         query: z.string().min(1, "搜索关键词不能为空"),
@@ -24,7 +24,7 @@ export const knowledgeRouter = createTRPCRouter({
     }),
 
   /** 获取知识库文档列表 */
-  list: publicProcedure
+  list: protectedProcedure
     .input(
       z
         .object({
@@ -39,14 +39,14 @@ export const knowledgeRouter = createTRPCRouter({
     }),
 
   /** 获取文档详情 */
-  getById: publicProcedure
+  getById: protectedProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ input }) => {
       return knowledgeRepo.findById(input.id);
     }),
 
   /** 上传知识文档（使用处理管道：切片+向量化） */
-  create: publicProcedure
+  create: protectedProcedure
     .input(
       z.object({
         title: z.string().min(1, "文档标题不能为空"),
@@ -73,7 +73,7 @@ export const knowledgeRouter = createTRPCRouter({
     }),
 
   /** RAG 问答 */
-  answer: publicProcedure
+  answer: protectedProcedure
     .input(
       z.object({
         query: z.string().min(1),
@@ -86,7 +86,7 @@ export const knowledgeRouter = createTRPCRouter({
     }),
 
   /** 删除文档 */
-  delete: publicProcedure
+  delete: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ input }) => {
       await knowledgeRepo.delete(input.id);
@@ -94,7 +94,7 @@ export const knowledgeRouter = createTRPCRouter({
     }),
 
   /** 知识库统计 */
-  getStats: publicProcedure
+  getStats: protectedProcedure
     .input(z.object({ tenantId: z.string().optional() }).optional())
     .query(async ({ input }) => {
       return knowledgeRepo.getStats(input?.tenantId ?? "tenant-default");

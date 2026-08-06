@@ -3,7 +3,7 @@
 // ─────────────────────────────────────────────────────────
 
 import { z } from "zod";
-import { createTRPCRouter, publicProcedure } from "~/server/api/trpc";
+import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
 import { agentRepo } from "~/lib/repository";
 import { DEFAULT_AGENTS } from "~/lib/data/agents";
 import { aiGateway } from "~/server/gateway/aiGateway";
@@ -13,7 +13,7 @@ const agentTypeEnum = z.enum(["DIGITAL_TWIN", "PURE_AGENT"]);
 
 export const agentRouter = createTRPCRouter({
   /** 获取预设 Agent 列表（从 15 个预设员工构建） */
-  getPresets: publicProcedure.query(async () => {
+  getPresets: protectedProcedure.query(async () => {
     return DEFAULT_AGENTS.map((a) => ({
       id: a.id,
       name: a.name,
@@ -26,7 +26,7 @@ export const agentRouter = createTRPCRouter({
   }),
 
   /** 获取 Agent 列表（支持筛选） */
-  list: publicProcedure
+  list: protectedProcedure
     .input(
       z
         .object({
@@ -42,14 +42,14 @@ export const agentRouter = createTRPCRouter({
     }),
 
   /** 获取单个 Agent 详情（含核心记忆） */
-  getById: publicProcedure
+  getById: protectedProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ input }) => {
       return agentRepo.findById(input.id);
     }),
 
   /** 创建 Agent */
-  create: publicProcedure
+  create: protectedProcedure
     .input(
       z.object({
         name: z.string().min(1, "名称不能为空"),
@@ -85,7 +85,7 @@ export const agentRouter = createTRPCRouter({
     }),
 
   /** 更新 Agent（状态、技能等） */
-  update: publicProcedure
+  update: protectedProcedure
     .input(
       z.object({
         id: z.string(),
@@ -100,7 +100,7 @@ export const agentRouter = createTRPCRouter({
     }),
 
   /** 获取 AI 网关状态 */
-  getAIGatewayStatus: publicProcedure.query(async () => {
+  getAIGatewayStatus: protectedProcedure.query(async () => {
     return {
       routing: aiGateway.getRoutingStatus(),
       health: aiGateway.getHealthStatus(),
@@ -108,14 +108,14 @@ export const agentRouter = createTRPCRouter({
   }),
 
   /** 获取 Agent 核心记忆 */
-  getCoreMemory: publicProcedure
+  getCoreMemory: protectedProcedure
     .input(z.object({ agentId: z.string() }))
     .query(async ({ input }) => {
       return agentRepo.getCoreMemory(input.agentId);
     }),
 
   /** 获取 Agent 长期记忆列表 */
-  getMemories: publicProcedure
+  getMemories: protectedProcedure
     .input(
       z.object({
         agentId: z.string(),
@@ -127,14 +127,14 @@ export const agentRouter = createTRPCRouter({
     }),
 
   /** 获取 Agent 成长曲线 */
-  getGrowthCurve: publicProcedure
+  getGrowthCurve: protectedProcedure
     .input(z.object({ agentId: z.string() }))
     .query(async ({ input }) => {
       return agentRepo.getGrowthCurve(input.agentId);
     }),
 
   /** 按 Owner 获取 Agent */
-  findByOwner: publicProcedure
+  findByOwner: protectedProcedure
     .input(z.object({ ownerId: z.string() }))
     .query(async ({ input }) => {
       return agentRepo.findByOwner(input.ownerId);
