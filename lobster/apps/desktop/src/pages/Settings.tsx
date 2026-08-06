@@ -6,11 +6,13 @@ const DEFAULT_API_URL = "http://localhost:3000";
 export function SettingsPage() {
   const [apiUrl, setApiUrl] = useState(DEFAULT_API_URL);
   const [token, setToken] = useState("");
+  const [userName, setUserName] = useState("");
   const [savedAt, setSavedAt] = useState<string | null>(null);
 
   useEffect(() => {
     setApiUrl(localStorage.getItem("lobster_api_url") ?? DEFAULT_API_URL);
     setToken(localStorage.getItem("lobster_token") ?? "");
+    setUserName(localStorage.getItem("lobster_user_name") ?? "");
   }, []);
 
   const handleSave = () => {
@@ -19,6 +21,11 @@ export function SettingsPage() {
       localStorage.setItem("lobster_token", token.trim());
     } else {
       localStorage.removeItem("lobster_token");
+    }
+    if (userName.trim()) {
+      localStorage.setItem("lobster_user_name", userName.trim());
+    } else {
+      localStorage.removeItem("lobster_user_name");
     }
     setSavedAt(new Date().toLocaleTimeString());
   };
@@ -42,6 +49,18 @@ export function SettingsPage() {
             className="mt-2 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-rose-300"
           />
           <p className="mt-2 text-xs text-gray-400">保存到 localStorage.lobster_api_url，tRPC 会请求该地址下的 /api/trpc。</p>
+        </div>
+
+        <div className="rounded-lg border border-gray-200 bg-white p-6">
+          <h2 className="mb-4 text-sm font-medium text-gray-700">用户信息</h2>
+          <label className="block text-xs font-medium text-gray-500">显示名称</label>
+          <input
+            value={userName}
+            onChange={(event) => setUserName(event.target.value)}
+            placeholder="协作时显示的名称"
+            className="mt-2 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-rose-300"
+          />
+          <p className="mt-2 text-xs text-gray-400">保存到 localStorage.lobster_user_name，协作消息中显示的昵称。</p>
         </div>
 
         <div className="rounded-lg border border-gray-200 bg-white p-6">
