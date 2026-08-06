@@ -3,7 +3,7 @@
 // ─────────────────────────────────────────────────────────
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Send, Paperclip, X, FileText, Image, Download } from "lucide-react";
+import { Send, Paperclip, X, FileText, Download } from "lucide-react";
 import { FileDropzone, FileChip, type UploadedFile } from "./FileDropzone";
 import { useWarRoomStore } from "../stores/warRoomStore";
 
@@ -132,6 +132,7 @@ export function WarRoomChat() {
   const [showDropzone, setShowDropzone] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState<UploadedFile[]>([]);
   const [sending, setSending] = useState(false);
+  const sendingRef = useRef(false);
 
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -143,22 +144,12 @@ export function WarRoomChat() {
     }
   }, [messages]);
 
-  // 回车发送
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLInputElement>) => {
-      if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault();
-        void handleSend();
-      }
-    },
-    [input, attachedFiles],
-  );
-
   const handleSend = useCallback(async () => {
     const content = input.trim();
     if (!content && attachedFiles.length === 0) return;
-    if (sending) return;
+    if (sendingRef.current) return;
 
+    sendingRef.current = true;
     setSending(true);
     const senderInfo = getSenderInfo();
 
@@ -172,10 +163,22 @@ export function WarRoomChat() {
       }
       setInput("");
     } finally {
+      sendingRef.current = false;
       setSending(false);
       inputRef.current?.focus();
     }
-  }, [input, attachedFiles, sending, sendMessage, sendFileMessage]);
+  }, [input, attachedFiles, sendMessage, sendFileMessage]);
+
+  // 回车发送
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        void handleSend();
+      }
+    },
+    [handleSend],
+  );
 
   const handleUploadComplete = useCallback((files: UploadedFile[]) => {
     setAttachedFiles((prev) => [...prev, ...files]);
