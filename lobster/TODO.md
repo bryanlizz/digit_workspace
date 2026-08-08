@@ -1,48 +1,47 @@
 # 数智企业 TODO
 
+> 最后更新：2026-08-08（交叉验证后同步）
+
 ## SaaS 落地计划
 
-当前状态：SaaS 骨架已搭建，但缺少真正可上线的核心能力。
+当前状态：核心骨架已完整，仅剩基础设施层和上线前置项。
 
-### P0 — 必须做
+### P0 — 必须做（全部 ✅ 已完成）
 
-1. **真实认证**
-   - 接入 NextAuth / Auth.js，替换当前 localStorage + 硬编码用户
-   - 实现服务端 session 校验，tRPC procedure 加 auth guard
+1. **真实认证** ✅
+   - 已接入 NextAuth（Credentials + LDAP + SSO/OIDC），`[...nextauth].ts` 完整实现
+   - JWT session + tenantId 注入 + tRPC `protectedProcedure` auth guard
    - 支持邮箱/手机号注册登录
 
-2. **租户隔离运行时**
-   - 从请求中解析 tenantId（header / subdomain / token claim）
-   - 所有数据访问加租户过滤，替换全局 `DEFAULT_TENANT_ID`
-   - tRPC context 注入 tenant，repository 层统一 where 条件
+2. **租户隔离运行时** ✅
+   - 从 JWT token 解析 tenantId
+   - 所有数据访问加租户过滤，`DEFAULT_TENANT_ID` 已消除
+   - tRPC context 注入 tenant
 
-3. **Mock Repo → Prisma 真实持久化**
-   - agent、employee、project、audit 四个 mock repo 切到 Prisma
-   - 数据库从 SQLite 切 PostgreSQL（多租户需要）
+3. **Mock Repo → Prisma 真实持久化** ✅
+   - agent、employee、project、audit 四个 mock repo 全部切换到 Prisma
+   - WarRoomMessage 等扩展模型已持久化
 
-### P1 — 上线前必须
+### P1 — 上线前必须（部分 🔶）
 
-4. **计费闭环**
-   - 接入 Stripe（订阅 + 用量计费）
-   - webhook 处理支付状态变更
-   - 套餐门控：按 plan 限制 agent 数量、AI 调用量、存储
+4. **计费闭环** 🔶
+   - Stripe 骨架已搭建：webhook handler + billingService + tRPC router + admin 页面
+   - 待：真实 Stripe 账号 + 密钥激活
 
-5. **部署与运维**
-   - CI/CD pipeline（GitHub Actions / 其他）
-   - 容器化部署支持水平扩展
-   - 环境变量管理、secrets rotation
+5. **部署与运维** 🔶
+   - Dockerfile ✅（多阶段构建 + Chromium for Playwright）
+   - 待：CI/CD pipeline（GitHub Actions），K8s Helm Chart
 
-### P2 — 增强
+### P2 — 增强（部分完成）
 
-6. **租户级限流与计量**
-   - 按租户的 API 限流
-   - AI token 用量统计与账单
-   - 用量 dashboard
+6. **租户级限流与计量** ⚠️
+   - AI 网关 RPM 限流已实现（`aiGateway.ts` `rateLimit` + `isRateLimited()`）
+   - 待：按租户的 API 限流、AI token 用量统计与账单、用量 dashboard
 
-7. **安全加固**
-   - RBAC 权限模型
-   - API key 管理
-   - 审计日志持久化（当前 mock）
+7. **安全加固** ✅
+   - RBAC 权限模型（5 级 permission bitmap）
+   - API key 管理（AI Gateway）
+   - 审计日志持久化（Prisma + hash chain 不可篡改）
 
 ---
 
@@ -54,12 +53,12 @@
 
 ## 知识库流水线闭环（已有 Plan）
 
-- ingestion → retrieval → graph 最小闭环
+- ingestion → retrieval → graph 最小闭环 ✅（`graphExtractor` 已在 agentRuntime + taskExecutor + knowledgePipeline 三处调用）
 - 检索入口收口
 - 详见 plan: harmonic-dazzling-tower.md
 
 ## 其他待办
 
-- Connector 执行稳定性（大部分已修复，IMAP/SMTP 仍为 mock 实现）
+- ~~Connector 执行稳定性~~ ✅（IMAP/SMTP 已脱离 mock，SMS 阿里云/腾讯云真实 API，2026-08-06）
 - 离职编排（权限回收、任务迁移）
 - 员工广场 UI 完善

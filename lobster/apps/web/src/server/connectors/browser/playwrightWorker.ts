@@ -150,16 +150,50 @@ export class PlaywrightBrowserWorker {
     }
   }
 
-  captureRecording(session: BrowserSession, name = "recording"): BrowserStepResult {
+  async captureRecording(session: BrowserSession, name = "recording"): Promise<BrowserStepResult> {
     const history = this.histories.get(session.id) ?? [];
     const payload = { sessionId: session.id, history };
     const data = JSON.stringify(payload, null, 2);
     this.record(session.id, "recording", name);
     session.lastRecording = name;
+
+    const artifacts: ToolArtifact[] = [
+      { name: `${name}.json`, mimeType: "application/json", data, type: "file" },
+    ];
+
+    // 关闭 context 以完成 Playwright 视频录制
+    const context = this.contexts.get(session.id);
+    if (context) {
+      try {
+        const page = this.pages.get(session.id);
+        const videoPath = page && !page.isClosed() ? await page.video()?.path() : null;
+        if (videoPath) {
+          this.recordings.set(session.id, videoPath);
+          artifacts.push({
+            name: `${name}.webm`,
+            mimeType: "video/webm",
+            data: videoPath, // 文件路径，后续可转为 URL
+            type: "file",
+          });
+        }
+        await context.close().catch(() => {});
+      } catch (err) {
+        console.warn("[PlaywrightWorker] 视频录制收尾失败:", err);
+      }
+      this.contexts.delete(session.id);
+      this.pages.delete(session.id);
+    }
+
     return {
       success: true,
-      artifacts: [{ name: `${name}.json`, mimeType: "application/json", data, type: "file" }],
-      externalRecords: [{ system: "browser", id: `${session.id}:${name}`, type: "recording", url: session.currentUrl ?? "", metadata: { actionCount: history.length } }],
+      artifacts,
+      externalRecords: [{
+        system: "browser",
+        id: `${session.id}:${name}`,
+        type: "recording",
+        url: session.currentUrl ?? "",
+        metadata: { actionCount: history.length, hasVideo: this.recordings.has(session.id) },
+      }],
       data: payload,
     };
   }
@@ -182,6 +216,54 @@ export class PlaywrightBrowserWorker {
 
   getHistory(sessionId: string): Array<{ at: string; action: string; target?: string; value?: string; note?: string }> {
     return this.histories.get(sessionId) ?? [];
+  }
+
+  /** 获取所有活跃会话状态 */
+  getSessions(): Array<{ sessionId: string; title: string; currentUrl: string; startedAt: string; screenshotCount: number; actionCount: number; lastActivity: string }> {
+    const sessions: Array<{ sessionId: string; title: string; currentUrl: string; startedAt: string; screenshotCount: number; actionCount: number; lastActivity: string }> = [];
+    for (const [sessionId] of this.pages) {
+      const history = this.histories.get(sessionId) ?? [];
+      sessions.push({
+        sessionId,
+        title: `Browser Session ${sessionId.slice(0, 8)}`,
+        currentUrl: "about:blank", // updated per-action
+        startedAt: history[0]?.at ?? new Date().toISOString(),
+        screenshotCount: 0,
+        actionCount: history.length,
+        lastActivity: history[history.length - 1]?.at ?? new Date().toISOString(),
+      });
+    }
+    return sessions;
+  }
+
+  /** 获取活跃页面 URL */
+  getActivePageUrl(sessionId: string): string {
+    const page = this.pages.get(sessionId);
+    if (page && !page.isClosed()) {
+      try { return page.url(); } catch { return "about:blank"; }
+    }
+    return "about:blank";
+  }
+
+  /** 获取活跃页面标题 */
+  getActivePageTitle(sessionId: string): string {
+    const page = this.pages.get(sessionId);
+    if (page && !page.isClosed()) {
+      return "未知"; // page.title() 是 async，同步方法返回默认值
+    }
+    return "未知";
+  }
+
+  /** 实时截取当前页面 */
+  async captureLiveScreenshot(sessionId: string): Promise<string | null> {
+    const page = this.pages.get(sessionId);
+    if (!page || page.isClosed()) return null;
+    try {
+      const buffer = await page.screenshot({ type: "png", fullPage: false });
+      return `data:image/png;base64,${buffer.toString("base64")}`;
+    } catch {
+      return null;
+    }
   }
 
   async close(): Promise<void> {

@@ -406,6 +406,17 @@ export class TaskExecutor {
           },
         );
       }
+
+      // Bad Case 自动归因
+      try {
+        const { analyzeBadCase } = await import("~/server/knowledge/badCaseAnalyzer");
+        const firstError = result.errors[0]?.error ?? result.summary;
+        const taskTitle = result.summary.slice(0, 100) || `任务 ${taskId}`;
+        const attribution = await analyzeBadCase(taskTitle, firstError);
+        console.log(`[TaskExecutor] Bad Case 归因: ${taskId} → ${attribution.category} (置信度: ${attribution.confidence})`);
+      } catch (err) {
+        console.warn(`[TaskExecutor] Bad Case 归因失败: ${taskId}`, err);
+      }
     }
 
     // 从任务结果中提取知识图谱实体

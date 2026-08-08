@@ -3,6 +3,23 @@
 // ─────────────────────────────────────────────────────────
 
 import { db } from "~/server/db";
+import Stripe from "stripe";
+import { env } from "~/env";
+
+let stripe: Stripe | null = null;
+
+function getStripeClient(): Stripe | null {
+  if (stripe) return stripe;
+  if (env.STRIPE_SECRET_KEY) {
+    stripe = new Stripe(env.STRIPE_SECRET_KEY, { apiVersion: "2025-06-30.basil" as any });
+  }
+  return stripe;
+}
+
+const STRIPE_PRICE_IDS: Record<string, string> = {
+  pro: env.STRIPE_PRICE_PRO ?? "",
+  enterprise: env.STRIPE_PRICE_ENTERPRISE ?? "",
+};
 
 export interface SubscriptionPlan {
   id: string;
@@ -100,6 +117,132 @@ export class BillingService {
   async generateMockInvoices(tenantId: string): Promise<Invoice[]> {
     const estimate = await this.getCurrentInvoiceEstimate(tenantId);
     return estimate ? [estimate] : [];
+  }
+
+  // ── Stripe 集成 ──
+
+  /** 创建 Stripe Checkout Session */
+  async createStripeCheckout(params: {
+    tenantId: string;
+    planId: "pro" | "enterprise";
+    seats: number;
+    successUrl: string;
+    cancelUrl: string;
+  }): Promise<{ url: string } | { error: string }> {
+    const s = getStripeClient();
+    if (!s) return { error: "Stripe 未配置（缺少 STRIPE_SECRET_KEY）" };
+
+    try {
+      const plan = this.getPlan(params.planId);
+      const priceId = STRIPE_PRICE_IDS[params.planId];
+      const lineItem: any = priceId
+        ? { price: priceId, quantity: params.seats }
+        : {
+            price_data: {
+              currency: "cny",
+              product_data: { name: `${plan.name} 套餐` },
+              recurring: { interval: "month" as const },
+              unit_amount: plan.seatPrice * 100, // 元 → 分
+            },
+            quantity: params.seats,
+          };
+
+      const session = await s.checkout.sessions.create({
+        mode: "subscription",
+        payment_method_types: ["card"],
+        line_items: [lineItem],
+        metadata: {
+          tenantId: params.tenantId,
+          planId: params.planId,
+          seats: String(params.seats),
+        },
+        success_url: params.successUrl,
+        cancel_url: params.cancelUrl,
+      });
+
+      return { url: session.url ?? "" };
+    } catch (error) {
+      console.error("[Billing] Checkout 创建失败:", error);
+      return { error: error instanceof Error ? error.message : "创建支付会话失败" };
+    }
+  }
+
+  /** 获取 Stripe 订阅状态 */
+  async getStripeSubscription(tenantId: string): Promise<{
+    plan: string; status: string; seats: number; currentPeriodEnd: string | null; cancelAtPeriodEnd: boolean;
+  } | null> {
+    const s = getStripeClient();
+    if (!s) return null;
+
+    try {
+      const subs = await s.subscriptions.search({
+        query: `metadata["tenantId"]:"${tenantId}"`,
+        limit: 1,
+      });
+      const sub = subs.data[0];
+      if (!sub) return null;
+
+      return {
+        plan: (sub.metadata.planId as string) ?? "free",
+        status: sub.status,
+        seats: parseInt(sub.metadata.seats as string ?? "1", 10),
+        currentPeriodEnd: (sub as any).current_period_end
+          ? new Date((sub as any).current_period_end * 1000).toISOString()
+          : null,
+        cancelAtPeriodEnd: (sub as any).cancel_at_period_end ?? false,
+      };
+    } catch (error) {
+      console.error("[Billing] 查询 Stripe 订阅失败:", error);
+      return null;
+    }
+  }
+
+  /** 取消 Stripe 订阅 */
+  async cancelStripeSubscription(tenantId: string): Promise<boolean> {
+    const s = getStripeClient();
+    if (!s) return false;
+
+    try {
+      const subs = await s.subscriptions.search({
+        query: `metadata["tenantId"]:"${tenantId}"`,
+        limit: 1,
+      });
+      const sub = subs.data[0];
+      if (!sub) return false;
+
+      await s.subscriptions.update(sub.id, { cancel_at_period_end: true });
+      return true;
+    } catch (error) {
+      console.error("[Billing] 取消 Stripe 订阅失败:", error);
+      return false;
+    }
+  }
+
+  /** 处理 Stripe Webhook */
+  async handleStripeWebhook(body: string, signature: string): Promise<{ received: boolean; type?: string; error?: string }> {
+    const s = getStripeClient();
+    const secret = env.STRIPE_WEBHOOK_SECRET;
+    if (!s || !secret) return { received: false, error: "Stripe Webhook 未配置" };
+
+    try {
+      const event = s.webhooks.constructEvent(body, signature, secret);
+      console.log(`[Billing] Webhook 事件: ${event.type}`);
+
+      // 可根据事件类型更新 DB 中的租户订阅状态
+      switch (event.type) {
+        case "checkout.session.completed":
+          // 支付成功 → 激活订阅
+          break;
+        case "customer.subscription.deleted":
+          // 订阅取消
+          break;
+      }
+
+      return { received: true, type: event.type };
+    } catch (error) {
+      console.error("[Billing] Webhook 签名验证失败:", error);
+      return { received: false, error: "签名验证失败" };
+    }
   }
 }
 

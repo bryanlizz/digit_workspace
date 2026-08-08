@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import Head from "next/head";
-import { CheckCircle, Download, RefreshCw, XCircle, Loader2 } from "lucide-react";
+import { CheckCircle, Download, RefreshCw, XCircle, Loader2, Monitor } from "lucide-react";
 import { AppShell } from "~/components/layout/AppShell";
 import { useAppStore } from "~/stores/appStore";
 import { AuditTimeline } from "~/components/security/AuditTimeline";
@@ -8,7 +8,7 @@ import { ResponsibilityChain } from "~/components/security/ResponsibilityChain";
 import { api } from "~/utils/api";
 
 
-type Tab = "activity" | "approval" | "chain" | "replay" | "stats";
+type Tab = "activity" | "approval" | "chain" | "replay" | "stats" | "browser";
 
 function buildAuditReport(logs: Array<{ createdAt: string; action: string; agentId: string | null; employeeId: string | null; permissionLevel: number; detail: Record<string, unknown> | null }>) {
   const rows = [["时间", "动作", "Agent", "员工", "权限", "详情"]];
@@ -74,6 +74,17 @@ export default function SecurityPage() {
   );
   const { data: stats } = api.audit.getStats.useQuery();
   const { data: tasks } = api.task.list.useQuery();
+  const { data: browserSessions, refetch: refetchSessions } = api.browser.getSessionStatus.useQuery();
+  const [browserSnapshotId, setBrowserSnapshotId] = useState<string | null>(null);
+  const { data: browserSnapshot } = api.browser.getSnapshot.useQuery(
+    { sessionId: browserSnapshotId ?? "" },
+    { enabled: !!browserSnapshotId, refetchInterval: 3000 }
+  );
+  const [browserHistoryId, setBrowserHistoryId] = useState<string | null>(null);
+  const { data: browserHistory } = api.browser.getSessionHistory.useQuery(
+    { sessionId: browserHistoryId ?? "" },
+    { enabled: !!browserHistoryId }
+  );
 
   const approve = api.task.approve.useMutation({ onSuccess: () => refetchApproval() });
   const reject = api.task.reject.useMutation({ onSuccess: () => refetchApproval() });
@@ -97,6 +108,7 @@ export default function SecurityPage() {
     { key: "approval", label: "审批队列" },
     { key: "chain", label: "责任链" },
     { key: "replay", label: "任务回放" },
+    { key: "browser", label: "浏览器会话" },
     { key: "stats", label: "统计" },
   ];
 
@@ -427,6 +439,94 @@ export default function SecurityPage() {
                   <p className="py-8 text-center text-sm text-gray-400">暂无数据</p>
                 )}
               </div>
+            </div>
+          )}
+
+          {activeTab === "browser" && (
+            <div className="rounded-xl bg-white p-5 shadow-sm">
+              <div className="mb-4 flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-bold text-gray-800">活跃浏览器会话</h3>
+                  <p className="mt-1 text-xs text-gray-500">查看 Playwright 驱动的浏览器会话状态与实时截图</p>
+                </div>
+                <button onClick={() => refetchSessions()} className="flex items-center gap-1 rounded-lg bg-gray-100 px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-200">
+                  <RefreshCw className="h-3 w-3" /> 刷新
+                </button>
+              </div>
+
+              {!browserSessions || browserSessions.length === 0 ? (
+                <div className="flex flex-col items-center py-14 text-center">
+                  <Monitor className="h-10 w-10 text-gray-200" />
+                  <p className="mt-3 text-sm text-gray-400">暂无活跃浏览器会话</p>
+                  <p className="mt-1 text-xs text-gray-300">设置 BROWSER_DRIVER=playwright 后，Boss 执行浏览器任务时会在此显示</p>
+                </div>
+              ) : (
+                <div className="grid gap-4 md:grid-cols-2">
+                  {browserSessions.map((session) => (
+                    <div key={session.sessionId} className="rounded-lg border border-gray-100 bg-gray-50 p-4">
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <p className="font-mono text-xs text-gray-500">{session.sessionId.slice(0, 12)}...</p>
+                          <p className="mt-1 text-sm font-medium text-gray-800">{session.title}</p>
+                          <p className="mt-0.5 text-xs text-gray-400">{session.currentUrl}</p>
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => {
+                              setBrowserSnapshotId(session.sessionId);
+                              setBrowserHistoryId(session.sessionId);
+                            }}
+                            className="rounded-lg bg-blue-100 px-2 py-1 text-xs font-medium text-blue-700 hover:bg-blue-200"
+                          >
+                            查看实时
+                          </button>
+                        </div>
+                      </div>
+                      <div className="mt-3 flex gap-4 text-xs text-gray-400">
+                        <span>操作: {session.actionCount}</span>
+                        <span>截图: {session.screenshotCount}</span>
+                        <span>活跃: {new Date(session.lastActivity).toLocaleTimeString()}</span>
+                      </div>
+
+                      {browserSnapshotId === session.sessionId && (
+                        <div className="mt-3 space-y-3">
+                          {browserSnapshot?.screenshot ? (
+                            <div className="overflow-hidden rounded-lg border border-gray-200">
+                              <img
+                                src={browserSnapshot.screenshot}
+                                alt={`Session ${session.sessionId} screenshot`}
+                                className="w-full"
+                              />
+                              <div className="bg-gray-100 px-3 py-1.5 text-xs text-gray-500">
+                                {browserSnapshot.url} · 每 3 秒自动刷新
+                              </div>
+                            </div>
+                          ) : (
+                            <p className="text-xs text-gray-400">截图获取中...</p>
+                          )}
+
+                          {browserHistory && browserHistory.length > 0 && (
+                            <details className="text-xs">
+                              <summary className="cursor-pointer text-gray-500 hover:text-gray-700">
+                                操作历史 ({browserHistory.length} 步)
+                              </summary>
+                              <div className="mt-2 max-h-40 space-y-1 overflow-y-auto rounded-lg border border-gray-100 bg-white p-2">
+                                {browserHistory.map((h, i) => (
+                                  <div key={i} className="flex gap-2 font-mono text-gray-600">
+                                    <span className="text-gray-400">{new Date(h.at).toLocaleTimeString()}</span>
+                                    <span className="font-medium">{h.action}</span>
+                                    {h.target && <span className="text-blue-500">{h.target.slice(0, 40)}</span>}
+                                  </div>
+                                ))}
+                              </div>
+                            </details>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>

@@ -620,6 +620,47 @@ export class CredentialService {
           tokenType: "Bearer",
         };
       }
+      case "google": {
+        const resp = await fetch("https://oauth2.googleapis.com/token", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({
+            client_id: process.env.GOOGLE_CLIENT_ID ?? "",
+            client_secret: process.env.GOOGLE_CLIENT_SECRET ?? "",
+            grant_type: "refresh_token",
+            refresh_token: refreshToken,
+          }).toString(),
+        });
+        const data = await resp.json() as Record<string, unknown>;
+        if (!resp.ok) return null;
+        return {
+          accessToken: data.access_token as string,
+          expiresIn: data.expires_in as number,
+          tokenType: (data.token_type as string) ?? "Bearer",
+          scope: data.scope as string,
+        };
+      }
+      case "microsoft": {
+        const resp = await fetch("https://login.microsoftonline.com/common/oauth2/v2.0/token", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({
+            client_id: process.env.MICROSOFT_CLIENT_ID ?? "",
+            client_secret: process.env.MICROSOFT_CLIENT_SECRET ?? "",
+            grant_type: "refresh_token",
+            refresh_token: refreshToken,
+          }).toString(),
+        });
+        const data = await resp.json() as Record<string, unknown>;
+        if (!resp.ok) return null;
+        return {
+          accessToken: data.access_token as string,
+          refreshToken: data.refresh_token as string,
+          expiresIn: data.expires_in as number,
+          tokenType: (data.token_type as string) ?? "Bearer",
+          scope: data.scope as string,
+        };
+      }
       default:
         return null;
     }

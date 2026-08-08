@@ -2,6 +2,7 @@ import { executeWithRetry, type AgentExecuteResult } from "./aiExecutor";
 import { agentRepo, taskRepo, auditRepo } from "~/lib/repository";
 import { DEFAULT_TENANT_ID } from "~/lib/data";
 import { graphExtractor } from "~/server/knowledge/graphExtractor";
+import { analyzeBadCase } from "~/server/knowledge/badCaseAnalyzer";
 
 /**
  * Agent 运行时
@@ -75,6 +76,31 @@ export class AgentRuntime {
         await graphExtractor.extractFromTaskResult(task.tenantId, task.title, result.content);
       } catch (error) {
         console.warn(`[AgentRuntime] 图谱抽取失败: ${taskId}`, error);
+      }
+    }
+
+    // 6. Bad Case 自动归因（任务失败时触发）
+    if (!result.success) {
+      try {
+        const attribution = await analyzeBadCase(
+          task.title,
+          result.content ?? "未知错误",
+          task.description
+        );
+        await taskRepo.update(taskId, {
+          result: JSON.stringify({
+            error: result.content ?? "任务执行失败",
+            badCaseAttribution: {
+              category: attribution.category,
+              rootCause: attribution.rootCause,
+              suggestion: attribution.suggestion,
+              confidence: attribution.confidence,
+            },
+          }),
+        });
+        console.log(`[AgentRuntime] Bad Case 归因完成: ${taskId} → ${attribution.category} (置信度: ${attribution.confidence})`);
+      } catch (error) {
+        console.warn(`[AgentRuntime] Bad Case 归因失败: ${taskId}`, error);
       }
     }
 

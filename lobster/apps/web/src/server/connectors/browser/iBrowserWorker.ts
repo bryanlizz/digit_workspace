@@ -26,7 +26,7 @@ export interface IBrowserWorker {
   select(session: BrowserSession, name: string, value: string): BrowserStepResult;
   extractText(session: BrowserSession, selector?: string): BrowserStepResult;
   captureScreenshot(session: BrowserSession, name?: string): BrowserStepResult;
-  captureRecording(session: BrowserSession, name?: string): BrowserStepResult;
+  captureRecording(session: BrowserSession, name?: string): BrowserStepResult | Promise<BrowserStepResult>;
   markHumanIntervention(session: BrowserSession, type: HumanInterventionEvent["type"], message: string): BrowserStepResult;
   getHistory(sessionId: string): Array<{ at: string; action: string; target?: string; value?: string; note?: string }>;
 }

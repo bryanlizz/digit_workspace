@@ -3,9 +3,10 @@
 // 按部门分组，类型用标识区分
 // ─────────────────────────────────────────────────────────
 
+import { useState } from "react";
 import { api } from "~/utils/api";
 import { useAppStore } from "~/stores/appStore";
-import { User, Bot, UserCheck, MapPin } from "lucide-react";
+import { User, Bot, UserCheck, MapPin, Copy } from "lucide-react";
 
 const STATUS_MAP: Record<string, { label: string; color: string }> = {
   IDLE: { label: "空闲", color: "bg-gray-100 text-gray-600" },
@@ -30,8 +31,42 @@ const DEPT_ORDER = ["总裁办", "战略与顶层设计", "行业与研究洞察
 
 export function EmployeeListView() {
   const openDetailPanel = useAppStore((s) => s.openDetailPanel);
-  const { data: agents } = api.agent.list.useQuery();
+  const { data: agents, refetch: refetchAgents } = api.agent.list.useQuery();
   const { data: employees } = api.employee.list.useQuery();
+  const utils = api.useContext();
+
+  // 克隆对话框状态
+  const [cloneTarget, setCloneTarget] = useState<{ id: string; name: string } | null>(null);
+  const [cloneName, setCloneName] = useState("");
+  const [isCloning, setIsCloning] = useState(false);
+  const [cloneError, setCloneError] = useState<string | null>(null);
+
+  const handleClone = async () => {
+    if (!cloneTarget) return;
+    setIsCloning(true);
+    setCloneError(null);
+    try {
+      const res = await fetch("/api/agent/clone", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sourceAgentId: cloneTarget.id, name: cloneName || undefined }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error((json as any).error ?? "克隆失败");
+      await utils.agent.list.invalidate();
+      setCloneTarget(null);
+    } catch (err) {
+      setCloneError(err instanceof Error ? err.message : "克隆失败");
+    } finally {
+      setIsCloning(false);
+    }
+  };
+
+  const openCloneDialog = (id: string, name: string) => {
+    setCloneTarget({ id, name });
+    setCloneName(`${name} 的副本`);
+    setCloneError(null);
+  };
 
   const members: ListMember[] = [];
 
@@ -94,7 +129,7 @@ export function EmployeeListView() {
                     <button
                       key={m.id}
                       onClick={() => openDetailPanel(m.type === "human" ? "employee" : "agent", { id: m.id })}
-                      className="flex items-start gap-3 rounded-xl border border-gray-100 bg-white p-4 text-left shadow-sm transition-all hover:border-blue-200 hover:shadow-md"
+                      className="group flex items-start gap-3 rounded-xl border border-gray-100 bg-white p-4 text-left shadow-sm transition-all hover:border-blue-200 hover:shadow-md"
                     >
                       <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-gray-50 text-gray-400">
                         <TIcon className="h-5 w-5" />
@@ -111,6 +146,15 @@ export function EmployeeListView() {
                           {s.label}
                         </span>
                       </div>
+                      {m.type !== "human" && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); openCloneDialog(m.id, m.name); }}
+                          className="flex-shrink-0 rounded-lg p-1.5 text-gray-300 opacity-0 transition-all hover:bg-blue-50 hover:text-blue-500 group-hover:opacity-100"
+                          title="克隆此 Agent"
+                        >
+                          <Copy className="h-4 w-4" />
+                        </button>
+                      )}
                     </button>
                   );
                 })}
@@ -123,6 +167,48 @@ export function EmployeeListView() {
           <div className="flex flex-col items-center justify-center py-20 text-gray-400">
             <p className="text-lg">暂无成员</p>
             <p className="mt-1 text-sm">前往「员工广场」招募数字员工</p>
+          </div>
+        )}
+
+        {/* 克隆对话框 */}
+        {cloneTarget && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={() => setCloneTarget(null)}>
+            <div className="absolute inset-0 bg-black/40" />
+            <div
+              className="relative z-10 w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h3 className="text-lg font-semibold text-gray-800">克隆 Agent</h3>
+              <p className="mt-1 text-sm text-gray-500">将「{cloneTarget.name}」克隆为新 Agent</p>
+              <div className="mt-4">
+                <label className="block text-sm font-medium text-gray-700">新 Agent 名称</label>
+                <input
+                  type="text"
+                  value={cloneName}
+                  onChange={(e) => setCloneName(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none"
+                  placeholder="输入新名称"
+                  autoFocus
+                  onKeyDown={(e) => { if (e.key === "Enter") handleClone(); }}
+                />
+              </div>
+              {cloneError && <p className="mt-2 text-xs text-red-500">{cloneError}</p>}
+              <div className="mt-5 flex gap-3 justify-end">
+                <button
+                  onClick={() => setCloneTarget(null)}
+                  className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100"
+                >
+                  取消
+                </button>
+                <button
+                  onClick={handleClone}
+                  disabled={isCloning || !cloneName.trim()}
+                  className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {isCloning ? "克隆中..." : "确认克隆"}
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>

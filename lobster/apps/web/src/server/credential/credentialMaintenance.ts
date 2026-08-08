@@ -32,3 +32,8 @@ export function stopCredentialMaintenance(): void {
     console.log("[CredentialMaintenance] 已停止");
   }
 }
+
+// 服务端自动启动（参考 Tool auto-registration 模式）
+if (typeof window === "undefined") {
+  startCredentialMaintenance();
+}

@@ -47,6 +47,10 @@ export const env = createEnv({
     FEISHU_APP_TOKEN: z.string().optional(),
     NOTIFY_WEBHOOK_URL: z.string().url().optional(),
     BROWSER_DRIVER: z.enum(["fetch", "playwright"]).default("fetch"),
+    STRIPE_SECRET_KEY: z.string().optional(),
+    STRIPE_WEBHOOK_SECRET: z.string().optional(),
+    STRIPE_PRICE_PRO: z.string().optional(),
+    STRIPE_PRICE_ENTERPRISE: z.string().optional(),
   },
 
   /**
@@ -107,6 +111,10 @@ export const env = createEnv({
     FEISHU_APP_TOKEN: process.env.FEISHU_APP_TOKEN,
     NOTIFY_WEBHOOK_URL: process.env.NOTIFY_WEBHOOK_URL,
     BROWSER_DRIVER: process.env.BROWSER_DRIVER,
+    STRIPE_SECRET_KEY: process.env.STRIPE_SECRET_KEY,
+    STRIPE_WEBHOOK_SECRET: process.env.STRIPE_WEBHOOK_SECRET,
+    STRIPE_PRICE_PRO: process.env.STRIPE_PRICE_PRO,
+    STRIPE_PRICE_ENTERPRISE: process.env.STRIPE_PRICE_ENTERPRISE,
     NEXT_PUBLIC_DEPLOYMENT_MODE: process.env.NEXT_PUBLIC_DEPLOYMENT_MODE,
     NEXT_PUBLIC_AUTH_MODE: process.env.NEXT_PUBLIC_AUTH_MODE,
     NEXT_PUBLIC_WORKER_URL: process.env.NEXT_PUBLIC_WORKER_URL,

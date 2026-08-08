@@ -1,8 +1,10 @@
 // ─────────────────────────────────────────────────────────
 // 数智企业 · IMAP Email Connector
-// 读取邮件功能
+// 真实 IMAP 邮件读取功能
 // ─────────────────────────────────────────────────────────
 
+import Imap from "imap";
+import { simpleParser } from "mailparser";
 import type { ToolDefinition, ToolCallResult, ToolCallContext } from "~/server/tools/types";
 import { BaseToolExecutor } from "~/server/tools/registry";
 import { withAudit } from "~/server/tools/toolAudit";
@@ -33,6 +35,19 @@ interface EmailMessage {
     contentType: string;
     size: number;
   }>;
+}
+
+/**
+ * 从 mailparser 解析的 AddressObject 中提取地址列表
+ */
+function extractAddresses(
+  addr: { value?: Array<{ address?: string; name?: string }> } | Array<{ value?: Array<{ address?: string; name?: string }> }> | undefined
+): string[] {
+  if (!addr) return [];
+  if (Array.isArray(addr)) {
+    return addr.flatMap((a) => a.value?.map((v) => v.address ?? "").filter(Boolean) ?? []);
+  }
+  return addr.value?.map((v) => v.address ?? "").filter(Boolean) ?? [];
 }
 
 /**
@@ -168,7 +183,7 @@ export const emailSearchTool: ToolDefinition = {
 };
 
 /**
- * 邮件读取执行器
+ * 邮件读取执行器（真实 IMAP）
  */
 class EmailReaderExecutor extends BaseToolExecutor {
   async execute(
@@ -186,7 +201,6 @@ class EmailReaderExecutor extends BaseToolExecutor {
     };
 
     try {
-      // 从 Vault 获取凭证
       const credData = await vaultService.getCredentialData(p.credentialId, context.agentId);
       if (!credData) {
         return {
@@ -196,25 +210,17 @@ class EmailReaderExecutor extends BaseToolExecutor {
         };
       }
 
-      // TODO: 实现真实的 IMAP 读取
-      // const cred: ImapCredential = JSON.parse(credData);
-      // const emails = await this.fetchEmails(cred, p);
-
-      // 模拟返回
-      const mockEmails: EmailMessage[] = [
-        {
-          id: "msg_001",
-          from: "hr@company.com",
-          to: ["user@example.com"],
-          subject: "面试邀请",
-          date: new Date().toISOString(),
-          body: "您好，邀请您参加面试...",
-        },
-      ];
+      const cred: ImapCredential = JSON.parse(credData.data) as ImapCredential;
+      const emails = await this.fetchEmails(cred, {
+        folder: p.folder ?? "INBOX",
+        limit: p.limit ?? 10,
+        unreadOnly: p.unreadOnly ?? false,
+        searchText: p.searchText,
+      });
 
       return {
         success: true,
-        data: { emails: mockEmails, total: mockEmails.length },
+        data: { emails, total: emails.length },
         executionTimeMs: Date.now() - startTime,
       };
     } catch (error) {
@@ -228,7 +234,7 @@ class EmailReaderExecutor extends BaseToolExecutor {
   }
 
   /**
-   * IMAP 连接和读取（待实现）
+   * 连接 IMAP 并获取邮件
    */
   private async fetchEmails(cred: ImapCredential, params: {
     folder?: string;
@@ -236,15 +242,129 @@ class EmailReaderExecutor extends BaseToolExecutor {
     unreadOnly?: boolean;
     searchText?: string;
   }): Promise<EmailMessage[]> {
-    // TODO: 使用 imap 模块实现
-    // const Imap = require('imap');
-    // const { simpleParser } = require('mailparser');
-    throw new Error("IMAP 功能待实现，请先安装 npm install imap mailparser");
+    return new Promise((resolve, reject) => {
+      const imap = new Imap({
+        user: cred.imapUser,
+        password: cred.imapPassword,
+        host: cred.imapHost,
+        port: cred.imapPort,
+        tls: cred.imapSecure,
+        tlsOptions: { rejectUnauthorized: false },
+      });
+
+      const messages: EmailMessage[] = [];
+
+      imap.once("ready", () => {
+        imap.openBox(params.folder ?? "INBOX", false, (err, box) => {
+          if (err) {
+            imap.end();
+            reject(new Error(`无法打开邮箱: ${err.message}`));
+            return;
+          }
+
+          // 构建搜索条件
+          const searchCriteria: unknown[] = [];
+          if (params.unreadOnly) {
+            searchCriteria.push(["UNSEEN"]);
+          }
+          if (params.searchText) {
+            searchCriteria.push([
+              "OR",
+              ["HEADER", "SUBJECT", params.searchText],
+              ["HEADER", "FROM", params.searchText],
+            ]);
+          }
+          // 如果没有搜索条件，使用 ALL
+          const criteria = searchCriteria.length > 0 ? searchCriteria : ["ALL"];
+
+          imap.search(criteria, (searchErr, uids) => {
+            if (searchErr) {
+              imap.end();
+              reject(new Error(`邮件搜索失败: ${searchErr.message}`));
+              return;
+            }
+
+            if (uids.length === 0) {
+              imap.end();
+              resolve([]);
+              return;
+            }
+
+            // 取最新的 N 封邮件
+            const targetUids = uids.slice(-(params.limit ?? 10));
+            const fetch = imap.fetch(targetUids, {
+              bodies: "",
+              struct: true,
+            });
+
+            fetch.on("message", (msg) => {
+              let body = "";
+
+              msg.on("body", (stream) => {
+                stream.on("data", (chunk: Buffer) => {
+                  body += chunk.toString("utf8");
+                });
+              });
+
+              msg.once("attributes", (attrs) => {
+                const uid = attrs.uid;
+              });
+
+              msg.once("end", () => {
+                // 解析邮件
+                simpleParser(body, (parseErr, parsed) => {
+                  if (parseErr) {
+                    console.warn("[Email] 邮件解析失败:", parseErr.message);
+                    return;
+                  }
+
+                  messages.push({
+                    id: parsed.messageId ?? `imap_${Date.now()}_${messages.length}`,
+                    from: parsed.from?.text ?? "",
+                    to: extractAddresses(parsed.to),
+                    cc: extractAddresses(parsed.cc),
+                    subject: parsed.subject ?? "(无主题)",
+                    date: parsed.date?.toISOString() ?? new Date().toISOString(),
+                    body: parsed.text ?? "",
+                    html: parsed.html || undefined,
+                    attachments: parsed.attachments?.map((att) => ({
+                      filename: att.filename ?? "attachment",
+                      contentType: att.contentType,
+                      size: att.size,
+                    })),
+                  });
+                });
+              });
+            });
+
+            fetch.once("error", (fetchErr) => {
+              reject(new Error(`邮件获取失败: ${fetchErr.message}`));
+            });
+
+            fetch.once("end", () => {
+              imap.end();
+            });
+          });
+        });
+      });
+
+      imap.once("error", (err) => {
+        reject(new Error(`IMAP 连接失败: ${err.message}`));
+      });
+
+      imap.once("end", () => {
+        // 按日期倒序排列
+        messages.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        resolve(messages);
+      });
+
+      imap.connect();
+    });
   }
 }
 
 /**
- * 邮件搜索执行器
+ * 邮件搜索执行器（真实 IMAP）
  */
 class EmailSearchExecutor extends BaseToolExecutor {
   async execute(
@@ -270,14 +390,16 @@ class EmailSearchExecutor extends BaseToolExecutor {
         };
       }
 
-      // TODO: 实现 IMAP 搜索
-      // const cred: ImapCredential = JSON.parse(credData);
-      // const emails = await this.imapSearch(cred, p);
+      const cred: ImapCredential = JSON.parse(credData.data) as ImapCredential;
+      const emails = await this.imapSearch(cred, {
+        criteria: p.criteria,
+        folder: p.folder ?? "INBOX",
+        limit: p.limit ?? 20,
+      });
 
-      // 模拟返回
       return {
         success: true,
-        data: { emails: [], total: 0 },
+        data: { emails, total: emails.length },
         executionTimeMs: Date.now() - startTime,
       };
     } catch (error) {
@@ -288,6 +410,140 @@ class EmailSearchExecutor extends BaseToolExecutor {
         executionTimeMs: Date.now() - startTime,
       };
     }
+  }
+
+  private imapSearch(cred: ImapCredential, params: {
+    criteria: string;
+    folder: string;
+    limit: number;
+  }): Promise<EmailMessage[]> {
+    return new Promise((resolve, reject) => {
+      const imap = new Imap({
+        user: cred.imapUser,
+        password: cred.imapPassword,
+        host: cred.imapHost,
+        port: cred.imapPort,
+        tls: cred.imapSecure,
+        tlsOptions: { rejectUnauthorized: false },
+      });
+
+      const messages: EmailMessage[] = [];
+
+      imap.once("ready", () => {
+        imap.openBox(params.folder, false, (err) => {
+          if (err) {
+            imap.end();
+            reject(new Error(`无法打开邮箱: ${err.message}`));
+            return;
+          }
+
+          // 将 IMAP 标准搜索字符串解析为数组
+          const criteriaParts = params.criteria
+            .split(/\s+/)
+            .filter(Boolean)
+            .map((part) => part.toUpperCase());
+
+          // 构建搜索条件
+          const searchCriteria: unknown[] = [];
+          let i = 0;
+          while (i < criteriaParts.length) {
+            if (criteriaParts[i] === "UNSEEN" || criteriaParts[i] === "SEEN" ||
+                criteriaParts[i] === "ANSWERED" || criteriaParts[i] === "FLAGGED" ||
+                criteriaParts[i] === "DELETED" || criteriaParts[i] === "DRAFT") {
+              searchCriteria.push([criteriaParts[i]!]);
+              i++;
+            } else if (criteriaParts[i] === "FROM" || criteriaParts[i] === "TO" ||
+                       criteriaParts[i] === "SUBJECT" || criteriaParts[i] === "BODY" ||
+                       criteriaParts[i] === "TEXT") {
+              const key = criteriaParts[i]!;
+              i++;
+              const value: string[] = [];
+              while (i < criteriaParts.length &&
+                     criteriaParts[i] !== "FROM" && criteriaParts[i] !== "TO" &&
+                     criteriaParts[i] !== "SUBJECT" && criteriaParts[i] !== "BODY" &&
+                     criteriaParts[i] !== "TEXT" && criteriaParts[i] !== "UNSEEN" &&
+                     criteriaParts[i] !== "SEEN") {
+                value.push(criteriaParts[i]!);
+                i++;
+              }
+              if (value.length > 0) {
+                searchCriteria.push(["HEADER", key, value.join(" ")]);
+              }
+            } else if (criteriaParts[i] === "SINCE" || criteriaParts[i] === "BEFORE") {
+              const key = criteriaParts[i]!;
+              i++;
+              if (i < criteriaParts.length) {
+                searchCriteria.push([key, criteriaParts[i]!]);
+                i++;
+              }
+            } else {
+              // 跳过无法识别的标记，尝试作为文本搜索
+              const textParts: string[] = [];
+              while (i < criteriaParts.length &&
+                     !["FROM", "TO", "SUBJECT", "BODY", "TEXT", "UNSEEN", "SEEN",
+                       "SINCE", "BEFORE"].includes(criteriaParts[i]!)) {
+                textParts.push(criteriaParts[i]!);
+                i++;
+              }
+              if (textParts.length > 0) {
+                searchCriteria.push(["TEXT", textParts.join(" ")]);
+              }
+            }
+          }
+
+          const criteria = searchCriteria.length > 0 ? searchCriteria : ["ALL"];
+
+          imap.search(criteria, (searchErr, uids) => {
+            if (searchErr) {
+              imap.end();
+              reject(new Error(`搜索失败: ${searchErr.message}`));
+              return;
+            }
+
+            if (uids.length === 0) {
+              imap.end();
+              resolve([]);
+              return;
+            }
+
+            const targetUids = uids.slice(-(params.limit));
+            const fetch = imap.fetch(targetUids, { bodies: "", struct: true });
+
+            fetch.on("message", (msg) => {
+              let body = "";
+              msg.on("body", (stream) => {
+                stream.on("data", (chunk: Buffer) => { body += chunk.toString("utf8"); });
+              });
+              msg.once("end", () => {
+                simpleParser(body, (_parseErr, parsed) => {
+                  messages.push({
+                    id: parsed.messageId ?? `imap_${Date.now()}_${messages.length}`,
+                    from: parsed.from?.text ?? "",
+                    to: extractAddresses(parsed.to),
+                    subject: parsed.subject ?? "(无主题)",
+                    date: parsed.date?.toISOString() ?? new Date().toISOString(),
+                    body: parsed.text ?? "",
+                  });
+                });
+              });
+            });
+
+            fetch.once("error", (fetchErr) => {
+              reject(new Error(`邮件获取失败: ${fetchErr.message}`));
+            });
+
+            fetch.once("end", () => { imap.end(); });
+          });
+        });
+      });
+
+      imap.once("error", (err) => { reject(new Error(`IMAP 连接失败: ${err.message}`)); });
+      imap.once("end", () => {
+        messages.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        resolve(messages);
+      });
+      imap.connect();
+    });
   }
 }
 

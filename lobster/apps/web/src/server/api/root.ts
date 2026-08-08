@@ -11,6 +11,8 @@ import { permissionRouter } from "~/server/api/routers/permission";
 import { offboardingRouter } from "~/server/api/routers/offboarding";
 import { credentialRouter } from "~/server/api/routers/credential";
 import { toolRouter } from "~/server/api/routers/tool";
+import { browserRouter } from "~/server/api/routers/browser";
+import { billingRouter } from "~/server/api/routers/billing";
 
 export const appRouter = createTRPCRouter({
   employee: employeeRouter,
@@ -25,6 +27,8 @@ export const appRouter = createTRPCRouter({
   offboarding: offboardingRouter,
   credential: credentialRouter,
   tool: toolRouter,
+  browser: browserRouter,
+  billing: billingRouter,
 });
 
 export type AppRouter = typeof appRouter;

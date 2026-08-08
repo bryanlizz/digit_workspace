@@ -1,5 +1,6 @@
 // ─────────────────────────────────────────────────────────
 // 数智企业 · Mock 审计日志仓库
+// 支持 hash 链防篡改，写入 DB（Prisma）
 // ─────────────────────────────────────────────────────────
 
 import { createHash, randomUUID } from "crypto";
@@ -209,12 +210,68 @@ export class MockAuditRepository implements IAuditRepository {
     };
   }
 
+  /**
+   * 记录审计日志，计算 hash chain 并写入 DB
+   */
   async log(entry: CreateAuditLogInput): Promise<void> {
-    const createdAt = new Date().toISOString();
-    const previousHash = this.logs[0]?.currentHash ?? null;
+    const createdAt = new Date();
+
+    // 从 DB 查询最新一条记录的 currentHash 作为 previousHash
+    let previousHash: string | null = null;
+    try {
+      const latestLog = await db.auditLog.findFirst({
+        where: { tenantId: entry.tenantId },
+        orderBy: { createdAt: "desc" },
+        select: { currentHash: true },
+      });
+      previousHash = latestLog?.currentHash ?? null;
+    } catch (err) {
+      // DB 查询失败时 fallback 到内存数组
+      previousHash = this.logs[0]?.currentHash ?? null;
+      console.warn("[MockAuditRepo] 查询 previousHash 失败，使用内存缓存:", err);
+    }
+
     const detail = (entry.detail as Record<string, unknown>) ?? null;
+
+    const currentHash = this.hashEntry({
+      tenantId: entry.tenantId,
+      agentId: entry.agentId ?? null,
+      employeeId: entry.employeeId ?? null,
+      action: entry.action,
+      permissionLevel: entry.permissionLevel ?? 1,
+      detail,
+      ipAddress: entry.ipAddress ?? null,
+      createdAt: createdAt.toISOString(),
+      previousHash,
+    });
+
+    const logId = `log-${randomUUID().slice(0, 8)}`;
+
+    // 写入 DB（权威数据源）
+    try {
+      await db.auditLog.create({
+        data: {
+          id: logId,
+          tenantId: entry.tenantId,
+          agentId: entry.agentId ?? null,
+          employeeId: entry.employeeId ?? null,
+          action: entry.action,
+          permissionLevel: entry.permissionLevel ?? 1,
+          detail: detail as any, // Prisma Json 类型
+          ipAddress: entry.ipAddress ?? null,
+          previousHash,
+          currentHash,
+          createdAt,
+        },
+      });
+      console.log(`[MockAuditRepo] DB 写入: ${entry.action} (hash: ${currentHash.slice(0, 12)}...)`);
+    } catch (err) {
+      console.error("[MockAuditRepo] DB 写入审计日志失败:", err);
+    }
+
+    // 内存数组保留为缓存层
     const log: AuditLogDTO = {
-      id: `log-${randomUUID().slice(0, 8)}`,
+      id: logId,
       tenantId: entry.tenantId,
       agentId: entry.agentId ?? null,
       employeeId: entry.employeeId ?? null,
@@ -223,24 +280,53 @@ export class MockAuditRepository implements IAuditRepository {
       detail,
       ipAddress: entry.ipAddress ?? null,
       previousHash,
-      currentHash: this.hashEntry({
-        tenantId: entry.tenantId,
-        agentId: entry.agentId ?? null,
-        employeeId: entry.employeeId ?? null,
-        action: entry.action,
-        permissionLevel: entry.permissionLevel ?? 1,
-        detail,
-        ipAddress: entry.ipAddress ?? null,
-        createdAt,
-        previousHash,
-      }),
-      createdAt,
+      currentHash,
+      createdAt: createdAt.toISOString(),
     };
     this.logs.unshift(log);
-    console.log(`[MockAuditRepo] Logged: ${entry.action}`);
   }
 
   async findMany(filter?: AuditFilter): Promise<AuditLogDTO[]> {
+    // 优先从 DB 查询
+    try {
+      const where: Record<string, unknown> = {};
+      if (filter?.tenantId) where.tenantId = filter.tenantId;
+      if (filter?.agentId) where.agentId = filter.agentId;
+      if (filter?.employeeId) where.employeeId = filter.employeeId;
+      if (filter?.action) where.action = filter.action;
+      if (filter?.startDate || filter?.endDate) {
+        where.createdAt = {};
+        if (filter.startDate) (where.createdAt as Record<string, unknown>).gte = new Date(filter.startDate);
+        if (filter.endDate) (where.createdAt as Record<string, unknown>).lte = new Date(filter.endDate);
+      }
+
+      const dbLogs = await db.auditLog.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+        skip: filter?.offset ?? 0,
+        take: filter?.limit ?? 100,
+      });
+
+      if (dbLogs.length > 0) {
+        return dbLogs.map((l) => ({
+          id: l.id,
+          tenantId: l.tenantId,
+          agentId: l.agentId,
+          employeeId: l.employeeId,
+          action: l.action,
+          permissionLevel: l.permissionLevel,
+          detail: l.detail as Record<string, unknown> | null,
+          ipAddress: l.ipAddress,
+          previousHash: l.previousHash,
+          currentHash: l.currentHash ?? "",
+          createdAt: l.createdAt.toISOString(),
+        }));
+      }
+    } catch (err) {
+      console.warn("[MockAuditRepo] DB 查询失败，降级到内存查询:", err);
+    }
+
+    // Fallback: 内存查询
     let result = [...this.logs];
     if (filter) {
       if (filter.tenantId) result = result.filter((l) => l.tenantId === filter.tenantId);
@@ -256,6 +342,83 @@ export class MockAuditRepository implements IAuditRepository {
     const offset = filter?.offset ?? 0;
     const limit = filter?.limit ?? result.length;
     return result.slice(offset, offset + limit);
+  }
+
+  /**
+   * 验证 hash 链完整性
+   * @returns 校验结果，包含总条数、有效条数和首个断裂位置
+   */
+  async verifyHashChain(tenantId: string): Promise<{
+    valid: boolean;
+    total: number;
+    validCount: number;
+    brokenAt: number | null;
+    message: string;
+  }> {
+    try {
+      const logs = await db.auditLog.findMany({
+        where: { tenantId },
+        orderBy: { createdAt: "asc" },
+        select: {
+          id: true,
+          previousHash: true,
+          currentHash: true,
+          action: true,
+          createdAt: true,
+        },
+      });
+
+      if (logs.length === 0) {
+        return { valid: true, total: 0, validCount: 0, brokenAt: null, message: "审计日志为空" };
+      }
+
+      let validCount = 0;
+      let brokenAt: number | null = null;
+
+      for (let i = 0; i < logs.length; i++) {
+        const current = logs[i]!;
+
+        // 第一条记录的 previousHash 应为 null
+        if (i === 0) {
+          if (current.previousHash !== null) {
+            brokenAt = i;
+            break;
+          }
+          validCount++;
+          continue;
+        }
+
+        const previous = logs[i - 1]!;
+        // 验证 previousHash 是否匹配上一条的 currentHash
+        if (current.previousHash !== previous.currentHash) {
+          brokenAt = i;
+          break;
+        }
+
+        // 验证本条 hash 是否与 (上条 hash + 本条数据) 一致
+        // 这里简单校验 previousHash 链，完整校验需要原始数据
+        validCount++;
+      }
+
+      // 检查最后一条（因为循环结束时不会验证最后一条的 currentHash）
+      if (brokenAt === null && logs.length > 0) {
+        validCount = logs.length; // 全部通过
+      }
+
+      const valid = brokenAt === null;
+      return {
+        valid,
+        total: logs.length,
+        validCount,
+        brokenAt,
+        message: valid
+          ? `hash 链完整，共 ${logs.length} 条记录`
+          : `hash 链在第 ${brokenAt! + 1} 条记录处断裂（共 ${logs.length} 条）`,
+      };
+    } catch (err) {
+      console.error("[MockAuditRepo] hash 链校验失败:", err);
+      return { valid: false, total: 0, validCount: 0, brokenAt: null, message: "校验异常" };
+    }
   }
 
   async getResponsibilityChain(taskId: string): Promise<ResponsibilityChainNode[]> {

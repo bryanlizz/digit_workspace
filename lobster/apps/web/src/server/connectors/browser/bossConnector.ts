@@ -554,7 +554,7 @@ const bossGreetExecutor = withAudit(async (tool, params, context) => {
       };
     }
 
-    const recording = browserWorker.captureRecording(session, "greet-session");
+    const recording = await browserWorker.captureRecording(session, "greet-session");
     const result = buildGreetResult(p.userId);
     recordOperation(context.agentId, "greet");
 
@@ -620,7 +620,7 @@ const bossResumeExecutor = withAudit(async (tool, params, context) => {
     }
 
     const resume = buildResumeFromText(pageResult.text ?? "", p.userId);
-    const recording = browserWorker.captureRecording(session, "resume-session");
+    const recording = await browserWorker.captureRecording(session, "resume-session");
 
     return {
       success: true,

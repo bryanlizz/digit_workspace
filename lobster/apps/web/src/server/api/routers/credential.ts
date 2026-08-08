@@ -6,6 +6,9 @@ import { z } from "zod";
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
 import { vaultService } from "~/server/vault";
 
+// 确保 OAuth Token 维护定时任务在服务端启动时被激活
+import "~/server/credential/credentialMaintenance";
+
 export const credentialRouter = createTRPCRouter({
   /** 获取凭证列表（不包含明文） */
   list: protectedProcedure
